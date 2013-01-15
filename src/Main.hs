@@ -45,12 +45,18 @@ spaceSep = intercalate " " . filter (not . null)
 getLibFlags :: Args -> FilePath -> IO String
 getLibFlags args = readFile >=> return . aux . parseInstalledPackageInfo
   where aux (ParseFailed err) = error $ show err
-        aux (ParseOk _ pkg) = spaceSep [getDirs pkg, getLibs pkg]
+        aux (ParseOk _ pkg) = spaceSep [getDirs pkg, getLibs pkg, getRpath pkg]
         getDirs = intercalate " " . map ("-L"++) . libraryDirs
         getLibs = intercalate " " . map (("-l"++) . (++"-ghc"++ghcVersion args))
                 . hsLibraries
+        getRpath | genRpath args = getrpathFlags
+                 | otherwise = const ""
+
+getrpathFlags :: InstalledPackageInfo -> String
+getrpathFlags = intercalate " " . map ("-Wl,-rpath,"++) . libraryDirs
 
 data Args = Args { ghcVersion   :: String
+                 , genRpath     :: Bool
                  , packageNames :: [String] }
 
 getFlags :: Args -> IO ()
@@ -72,6 +78,9 @@ argParser = Args <$> strOption
                       <> metavar "GHC_VERSION" 
                       <> value defaultGhcVersion
                       <> help "Version of GHC to use; default is 7.6.1")
+                 <*> switch
+                     (long "rpath"
+                      <> help "Emit -Wl,-rpath flags in addition to -L/-l")
                  <*> arguments1 Just (metavar "PackageNames")
                               
 main :: IO ()
