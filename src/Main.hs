@@ -80,4 +80,3 @@ main = execParser opts >>= getFlags
                     (fullDesc 
                      <> progDesc "Generate linker flags for requested packages."
                      <> header "cabal-config - polyglot tool chain helper")
-                          
