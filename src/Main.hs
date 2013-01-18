@@ -6,7 +6,6 @@ import Data.Maybe (listToMaybe)
 import Distribution.InstalledPackageInfo
 import Options.Applicative
 import System.Directory
-import System.Environment
 import System.FilePath
 
 defaultGhcVersion :: String
@@ -23,6 +22,16 @@ findPkgDir version =
              <$> getDirectoryContents d)
      return . fmap (d</>) . listToMaybe $ 
        filter ((== version) . last . splitOn '-') ghcs
+
+-- Find the package.conf.d associated the base.
+findBasePkgDir :: String -> IO FilePath
+findBasePkgDir version =
+    do d <- (</>"lib") <$> getHomeDirectory
+       ghcs <- filterM (doesDirectoryExist . (d</>)) =<<
+               (filter (not . isPrefixOf "."))
+               <$> getDirectoryContents d
+       return . (d</>) . head $
+         filter ((== version) . last . splitOn '-') ghcs
      
 splitOn :: Eq a => a -> [a] -> [[a]]
 splitOn x = go
@@ -34,10 +43,10 @@ findNewest :: [FilePath] -> String -> Maybe FilePath
 findNewest fs pkgName = listToMaybe . reverse . sort $ 
                         filter ((pkgName ==) . getPkgName) fs
 
-getPkgName :: String -> String
-getPkgName = aux . reverse . splitOn '-'
+getPkgName :: FilePath -> String
+getPkgName = aux . reverse . splitOn '-' . takeFileName
   where aux (_hash : _version : name) = intercalate "-" (reverse name)
-        aux _ = error "Unexpected .conf file name"
+        aux x = error $ "Unexpected .conf file name " ++ show x
 
 spaceSep :: [String] -> String
 spaceSep = intercalate " " . filter (not . null)
@@ -59,17 +68,26 @@ data Args = Args { ghcVersion   :: String
                  , genRpath     :: Bool
                  , packageNames :: [String] }
 
+getConfs :: FilePath -> IO [FilePath]
+getConfs d = map (d</>) 
+           . filter (not . isPrefixOf "builtin_rts")
+           .  filter ((== ".conf") . takeExtension)
+          <$> getDirectoryContents d
+
 getFlags :: Args -> IO ()
 getFlags args = 
   do d' <- findPkgDir (ghcVersion args) 
+     db <- (</> "package.conf.d") <$> findBasePkgDir (ghcVersion args)
      let d = case d' of
                Nothing -> error $ "No package database for GHC version "++
                           ghcVersion args
                Just x -> x </> "package.conf.d"
-     confs <- filter ((==".conf") . takeExtension) <$> getDirectoryContents d
+     --confs <- filter ((==".conf") . takeExtension) <$> getDirectoryContents d
+     confs <- (++) <$> getConfs d <*> getConfs db
      case sequence (map (findNewest confs) (packageNames args)) of
        Nothing -> putStrLn "No packages parsed"
-       Just pkgs' -> mapM (getLibFlags args . (d</>)) pkgs' >>= 
+       Just pkgs' -> mapM (getLibFlags args) pkgs' >>= 
+       --Just pkgs' -> mapM (getLibFlags args . (d</>)) pkgs' >>= 
                      putStrLn . spaceSep
 
 argParser :: Parser Args
